@@ -1,6 +1,8 @@
 # RC 学习笔记
 ***
 
+[TOC]
+
 ## PID--调参
 - [闭环和PID控制，视频](https://www.bilibili.com/video/BV17x411d7XR)
 - [RM控制实例讲解](https://www.bilibili.com/read/cv6515031/)
@@ -80,6 +82,140 @@
 > **注意，其它物理层（例如“低速CAN”、单线缆CAN和其它物理层）不一定需要进行端接。但是您的常用高速ISO 11898 CAN总线总是需要至少一个端接器。**
 
 参考：[Using termination to ensure recessive bit transmission](https://www.kvaser.cn/en/using-termination-ensure-recessive-bit-transmission/)
+
+### 代码code
+**配置流程**  
+1. 所需结构体
+```c
+GPIO_InitTypeDef GPIO_InitSturcture;
+CAN_InitTypeDef CAN_InitSturcture;
+CAN_FilterInitTypeDef CAN_FilterInitSturcture;
+```  
+
+2. 配置相关引脚的复用功能，使能CAN时钟，配置GPIO
+```c
+//使能相关时钟
+RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);//使能PORTA时钟	                   											 
+RCC_APB1PeriphClockCmd(RCC_APB1Periph_CAN1, ENABLE);//使能CAN1时钟	
+	
+//初始化GPIO
+GPIO_InitStructure.GPIO_Pin = GPIO_Pin_12;
+GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;	//复用推挽
+GPIO_Init(GPIOA, &GPIO_InitStructure);			//初始化IO
+
+GPIO_InitStructure.GPIO_Pin = GPIO_Pin_11;
+GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;	//上拉输入
+GPIO_Init(GPIOA, &GPIO_InitStructure);			//初始化
+```  
+3. 设置CAN工作模式及波特率等
+   
+这一步通过先设置CAN_MCR寄存器的INRQ位，让CAN进入初始化模式，然后设置CAN_MCR的其他相关控制位。再通过CAN_BTR设置波特率和工作模式（正常模式/环回模式）等信息。最后设置INRQ为0，退出初始化模式。  
+CAN初始化结构体：
+```c
+typedef struct{
+    uint16_t CAN_Prescaler;   
+    uint8_t CAN_Mode;         
+    uint8_t CAN_SJW;           
+    uint8_t CAN_BS1;                 
+    uint8_t CAN_BS2;             
+    FunctionalState CAN_TTCM; 
+    FunctionalState CAN_ABOM;   
+    FunctionalState CAN_AWUM;   
+    FunctionalState CAN_NART; 
+    FunctionalState CAN_RFLM; 
+    FunctionalState CAN_TXFP;   
+    } CAN_InitTypeDef;
+```
+> 前面5个参数是用来设置寄存器CAN_BTR，用来设置模式以及波特率相关的参数，设置模式的参数是CAN_Mode（环模式CAN_Mode_LoopBack和普通模式CAN_Mode_Normal，还可以选择静默模式以及静默回环模式测试）。其他设置波特率相关的参数CAN_Prescaler，CAN_SJW，CAN_BS1和CAN_BS2分别用来设置波特率分频器，重新同步跳跃宽度以及时间段1和时间段2占用的时间单元数。后面6个成员变量用来设置寄存器CAN_MCR，也就是设置CAN通信相关的控制位。(翻翻中文参考手册中这两个寄存器的描述)  
+
+初始化实例为：
+
+```c
+//CAN单元设置
+CAN_InitStructure.CAN_TTCM=DISABLE;			//非时间触发通信模式  
+CAN_InitStructure.CAN_ABOM=DISABLE;			//软件自动离线管理	 
+CAN_InitStructure.CAN_AWUM=DISABLE;			//睡眠模式通过软件唤醒(清除CAN->MCR的SLEEP位)
+CAN_InitStructure.CAN_NART=ENABLE;			//禁止报文自动传送 
+CAN_InitStructure.CAN_RFLM=DISABLE;		 	//报文不锁定,新的覆盖旧的  
+CAN_InitStructure.CAN_TXFP=DISABLE;			//优先级由报文标识符决定 
+CAN_InitStructure.CAN_Mode= mode;	        //模式设置： mode:0,普通模式;1,回环模式; 
+//设置波特率
+CAN_InitStructure.CAN_SJW=tsjw;				//重新同步跳跃宽度(Tsjw)为tsjw+1个时间单位  CAN_SJW_1tq	 CAN_SJW_2tq CAN_SJW_3tq CAN_SJW_4tq
+CAN_InitStructure.CAN_BS1=tbs1; 			//Tbs1=tbs1+1个时间单位CAN_BS1_1tq ~CAN_BS1_16tq
+CAN_InitStructure.CAN_BS2=tbs2;				//Tbs2=tbs2+1个时间单位CAN_BS2_1tq ~	CAN_BS2_8tq
+CAN_InitStructure.CAN_Prescaler=brp;        //分频系数(Fdiv)为brp+1	
+CAN_Init(CAN1, &CAN_InitStructure);        	//初始化CAN1 
+```  
+4. 设置过滤器（读手册，bxCAN） 
+```c
+CAN_FilterInitStructure.CAN_FilterNumber=0;	//过滤器0
+CAN_FilterInitStructure.CAN_FilterMode=CAN_FilterMode_IdMask; 	//屏蔽位模式
+CAN_FilterInitStructure.CAN_FilterScale=CAN_FilterScale_32bit; 	//32位宽 
+CAN_FilterInitStructure.CAN_FilterIdHigh=0x0000;	//32位ID
+CAN_FilterInitStructure.CAN_FilterIdLow=0x0000;
+CAN_FilterInitStructure.CAN_FilterMaskIdHigh=0x0000;//32位MASK
+CAN_FilterInitStructure.CAN_FilterMaskIdLow=0x0000;
+CAN_FilterInitStructure.CAN_FilterFIFOAssignment=CAN_Filter_FIFO0;//过滤器0关联到FIFO0
+CAN_FilterInitStructure.CAN_FilterActivation=ENABLE;//激活过滤器0
+
+CAN_FilterInit(&CAN_FilterInitStructure);			//过滤器初始化
+
+//CAN中断优先级设置
+#if CAN_RX0_INT_ENABLE 
+	CAN_ITConfig(CAN1,CAN_IT_FMP0,ENABLE);				//FIFO0消息挂号中断允许.		    
+
+	NVIC_InitStructure.NVIC_IRQChannel = USB_LP_CAN1_RX0_IRQn;
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;     // 主优先级为1
+	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;            // 次优先级为0
+	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+	NVIC_Init(&NVIC_InitStructure);
+#endif
+	return 0;
+```  
+5. 发送数据的函数
+```c
+//can发送一组数据(固定格式:ID为0X12(StdId),标准帧,数据帧)	
+//len:数据长度(最大为8)				     
+//msg:数据指针,最大为8个字节.
+//返回值:0,成功;
+//		 其他,失败;
+u8 Can_Send_Msg(u8* msg,u8 len)
+{	
+	u8 mbox;
+	u16 i=0;
+	CanTxMsg TxMessage;
+	TxMessage.StdId=0x12;			// 标准标识符 
+	TxMessage.ExtId=0x12;			// 设置扩展标示符 
+	TxMessage.IDE=CAN_Id_Standard; 	// 标准帧
+	TxMessage.RTR=CAN_RTR_Data;		// 数据帧
+	TxMessage.DLC=len;				// 要发送的数据长度
+	for(i=0;i<len;i++)
+	TxMessage.Data[i]=msg[i];			          
+	mbox= CAN_Transmit(CAN1, &TxMessage);   
+	i=0; 
+	while((CAN_TransmitStatus(CAN1, mbox)==CAN_TxStatus_Failed)&&(i<0XFFF))i++;	//等待发送结束
+	if(i>=0XFFF)return 1;
+	return 0;	 
+}
+```  
+6. 接受信息的函数
+```c
+//can口接收数据查询
+//buf:数据缓存区;	 
+//返回值:0,无数据被收到;
+//		 其他,接收的数据长度;
+u8 Can_Receive_Msg(u8 *buf)
+{		   		   
+ 	u32 i;
+	CanRxMsg RxMessage;
+    if( CAN_MessagePending(CAN1,CAN_FIFO0)==0)return 0;		//没有接收到数据,直接退出 
+    CAN_Receive(CAN1, CAN_FIFO0, &RxMessage);//读取数据	
+    for(i=0;i<8;i++)
+    buf[i]=RxMessage.Data[i];  
+	return RxMessage.DLC;	
+}
+```  
 
 
 ## RoboMaster-A
