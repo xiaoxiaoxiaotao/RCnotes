@@ -7,7 +7,42 @@
 - [闭环和PID控制，视频](https://www.bilibili.com/video/BV17x411d7XR)
 - [RM控制实例讲解](https://www.bilibili.com/read/cv6515031/)
 - [Matlab中国讲解的PID算法和误差修正](https://www.bilibili.com/video/BV19U4y1L7Uw/?spm_id_from=333.999.0.0)
-- [PID算法实现](https://zhuanlan.zhihu.com/p/468741326)
+- [PID算法实现](https://zhuanlan.zhihu.com/p/468741326)  
+
+1. 先定义PID的结构体
+```c
+typedef struct {
+
+	/* Controller gains */   //PID系数
+	float Kp;
+	float Ki;
+	float Kd;
+
+	/* Derivative low-pass filter time constant */
+	float tau;             //导数低通滤波器时间常数
+
+	/* Output limits */
+	float limMin;
+	float limMax;
+	
+	/* Integrator limits */
+	float limMinInt;
+	float limMaxInt;
+
+	/* Sample time (in seconds) */
+	float T;
+
+	/* Controller "memory" */
+	float integrator;
+	float prevError;			/* Required for integrator */
+	float differentiator;
+	float prevMeasurement;		/* Required for differentiator */
+
+	/* Controller output */
+	float out;
+
+} PIDController;
+```
 
 ## CAN bus
 - [简介](https://blog.csdn.net/CSDN_Yoa/article/details/81384924)
